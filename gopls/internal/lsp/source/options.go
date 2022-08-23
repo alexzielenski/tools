@@ -847,6 +847,15 @@ func (o *Options) ForClientCapabilities(clientName *protocol.Msg_XInitializePara
 	// Client's semantic tokens
 	o.SemanticTypes = caps.TextDocument.SemanticTokens.TokenTypes
 	o.SemanticMods = caps.TextDocument.SemanticTokens.TokenModifiers
+
+	//!TODO: Not sure how to plug additional modifiers capabilities into the
+	// vscode-go client. Feels weird that this is configurable client-side,
+	// given that ultimately the server does decide which modifiers are used
+	// in the registration API, and most clients like vscode forward modifiers
+	// straight to the theme, so theme authors can decide whether to support new
+	// mofifiers
+	o.SemanticMods = append(o.SemanticMods, "0", "1", "2", "3", "4", "field")
+
 	// we don't need Requests, as we support full functionality
 	// we don't need Formats, as there is only one, for now
 

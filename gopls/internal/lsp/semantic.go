@@ -12,9 +12,11 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"hash/fnv"
 	"log"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -425,6 +427,29 @@ func (e *encoded) inspector(n ast.Node) bool {
 	return true
 }
 
+func (e *encoded) getSymbol(node *ast.Ident) types.Object {
+	// Identify the identity of this symbol
+	symbol := e.ti.Defs[node]
+	if symbol == nil {
+		symbol = e.ti.Uses[node]
+	}
+
+	return symbol
+}
+
+// Generates a consistent hash representing the identity of the symbol used
+// at the given identifier. Hash stays consistent across invocations of the
+// process for each symbol definition
+func (e *encoded) calculateSymbolHash(symbol types.Object) uint64 {
+	if symbol == nil {
+		return 0
+	}
+
+	h := fnv.New64a()
+	h.Write([]byte(symbol.Id()))
+	return h.Sum64()
+}
+
 func (e *encoded) ident(x *ast.Ident) {
 	if e.ti == nil {
 		what, mods := e.unkIdent(x)
@@ -436,9 +461,18 @@ func (e *encoded) ident(x *ast.Ident) {
 		}
 		return
 	}
+
+	// Only allow 0, 1, 2, 3, 4 modifiers. More than that for rainbow highlighting
+	// is often too many
+	symbol := e.getSymbol(x)
+	symbolModifier := strconv.Itoa(int(e.calculateSymbolHash(symbol) % 5))
+
 	def := e.ti.Defs[x]
 	if def != nil {
-		what, mods := e.definitionFor(x, def)
+		mods := []string{symbolModifier}
+		what, defMods := e.definitionFor(x, def)
+		mods = append(mods, defMods...)
+
 		if what != "" {
 			e.token(x.Pos(), len(x.String()), what, mods)
 		}
@@ -448,7 +482,10 @@ func (e *encoded) ident(x *ast.Ident) {
 		return
 	}
 	use := e.ti.Uses[x]
-	tok := func(pos token.Pos, lng int, tok tokenType, mods []string) {
+	tok := func(pos token.Pos, lng int, tok tokenType, useMods []string) {
+		mods := []string{symbolModifier}
+		mods = append(mods, useMods...)
+
 		e.token(pos, lng, tok, mods)
 		q := "nil"
 		if use != nil {
@@ -491,7 +528,13 @@ func (e *encoded) ident(x *ast.Ident) {
 		// can this happen? Don't think so
 		e.unexpected(fmt.Sprintf("%s %T %#v", x.String(), tt, tt))
 	case *types.Func:
-		tok(x.Pos(), len(x.Name), tokFunction, nil)
+		token := tokFunction
+		// Check if function ident is a method
+		if sig, ok := y.Type().(*types.Signature); ok && sig.Recv() != nil {
+			token = tokMethod
+		}
+
+		tok(x.Pos(), len(x.Name), token, nil)
 	case *types.Label:
 		// nothing to map it to
 	case *types.Nil:
@@ -516,7 +559,12 @@ func (e *encoded) ident(x *ast.Ident) {
 			// or FuncLit and then it's a parameter
 			tok(x.Pos(), len(x.Name), tokParameter, nil)
 		} else {
-			tok(x.Pos(), len(x.Name), tokVariable, nil)
+			// Check if field
+			var mods []string
+			if y.IsField() {
+				mods = append(mods, "field")
+			}
+			tok(x.Pos(), len(x.Name), tokVariable, mods)
 		}
 
 	default:
@@ -995,6 +1043,6 @@ var (
 	}
 	semanticModifiers = [...]string{
 		"declaration", "definition", "readonly", "static",
-		"deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary",
+		"deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary", "0", "1", "2", "3", "4",
 	}
 )
